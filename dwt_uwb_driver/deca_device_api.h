@@ -1,6 +1,6 @@
 /**
  * @file      deca_device_api.h
- * 
+ *
  * @brief     QM33xxx Device API Functions
  *
  * @author    Decawave Applications
@@ -353,7 +353,7 @@ extern "C"
 #define SYS_STATUS_ALL_RX_ERR                                                                                                                                  \
     ((uint32_t)DWT_INT_RXPHE_BIT_MASK | (uint32_t)DWT_INT_RXFCE_BIT_MASK | (uint32_t)DWT_INT_RXFSL_BIT_MASK  | \
      (uint32_t)DWT_INT_RXSTO_BIT_MASK | (uint32_t)DWT_INT_ARFE_BIT_MASK  | (uint32_t)DWT_INT_CIAERR_BIT_MASK | \
-     (uint32_t)DWT_INT_CPERR_BIT_MASK)
+    (uint32_t)DWT_INT_CPERR_BIT_MASK | (uint32_t)DWT_INT_RXOVRR_BIT_MASK)
 
 /* All RX events after a correct packet reception mask. */
 #define SYS_STATUS_ALL_RX_GOOD                                                                                                                                 \
@@ -1217,7 +1217,7 @@ extern "C"
     {
         tx_adj_cfg_t tx_frame_cfg;
     } tx_adj_res_t;
-    
+
     /*! ISR configuration flags
      *
      * Use with dwt_configureisr().
@@ -1247,13 +1247,13 @@ extern "C"
 /*
  * XTAL temperature compensation set parameters structure
 * */
-    typedef struct 
+    typedef struct
     {
         int8_t temperature;               //!< pass in TEMP_INIT (-127) to use on chip temperature sensor
         uint8_t crystal_trim;             //!< pass in 0 if you want to use the calibration value from OTP
         int8_t crystal_trim_temperature;  //!< temperature of the crystal for crystal_trim, if TEMP_INIT (-127) will assume 25C.
-        int32_t crystal_alpha;            //!< * 2^22 scaled alpha value 
-        int32_t crystal_beta;             //!< * 2^22 scaled beta value 
+        int32_t crystal_alpha;            //!< * 2^22 scaled alpha value
+        int32_t crystal_beta;             //!< * 2^22 scaled beta value
     } dwt_xtal_trim_t;
 
 
@@ -1823,14 +1823,14 @@ extern "C"
     * input parameters:
     * @param preambleLength - sets the length of the preamble, value of 0 disables this setting and the length of the
     *                         frame will be dependent on the TXPSR_PE setting as configured by dwt_configure function
-    * 
+    *
     * @note preambleLength is uint16_t only to keep compatibility with QM35xxx devices but cannot be > 0xFF.
-    * 
+    *
     * Valid range for the preamble length code is [1..0xFF] which corresponds to [16..2048] symbols.
     * You can use convenience constants DWT_PLEN_32..DWT_PLEN_2048 defined for some
     * common preamble lengths. Note that setting preamble length smaller than 32 symbols
     * should be used for testing only and will likely result in poor performance.
-    * 
+    *
     * output parameters
     *
     * no return value
@@ -4107,9 +4107,9 @@ extern "C"
      *        characteristics, if you pass in a temperature of TEMP_INIT (-127), the functions will also read
      *        onchip temperature sensors to determine the temperature, the crystal temperature
      *        could be different.
-     *        If a crystal temperature of TEMP_INIT (-127) is passed, the function will assume 25C. 
+     *        If a crystal temperature of TEMP_INIT (-127) is passed, the function will assume 25C.
      *        If a crystal trim of 0 is passed, the function will use the calibration value from OTP.
-     * 
+     *
      *        This is to compensate for crystal temperature versus frequency curve e.g.
      *
      *  Freq Hi
@@ -4125,7 +4125,7 @@ extern "C"
      *
      *
      * input parameters:
-     * @param[in] params -- the based-on parameters to set the new crystal trim. 
+     * @param[in] params -- the based-on parameters to set the new crystal trim.
      * @param[in] xtaltrim -- newly programmed crystal trim value
      *
      * output parameters

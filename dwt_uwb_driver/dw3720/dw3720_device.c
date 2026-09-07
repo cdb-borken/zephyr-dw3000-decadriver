@@ -44,6 +44,7 @@ typedef struct
     uint8_t otprev;            // OTP revision number (read during initialisation)
     uint8_t init_xtrim;        // initial XTAL trim value read from OTP (or defaulted to mid-range if OTP not programmed)
     uint8_t dblbuffon;         // Double RX buffer mode and DB status flag
+    uint8_t dblbuffmode;
     uint8_t channel;           // Current channel the PLL is configured for
     uint16_t sleep_mode;       // Used for automatic reloading of LDO tune and microcode at wake-up
     int16_t ststhreshold;      // Threshold for deciding if received STS is good or bad
@@ -2582,9 +2583,9 @@ void ull_writetxfctrl(dwchip_t *dw, uint16_t txFrameLength, uint16_t txBufferOff
  * @param dw - DW3720 chip descriptor handler.
  * @param preambleLength - sets the length of the preamble, value of 0 disables this setting and the length of the
  *                         frame will be dependent on the TXPSR_PE setting as configured by dwt_configure function
- * 
+ *
  * @note preambleLength is uint16_t only to keep compatibility with QM35xxx devices but cannot be > 0xFF.
- * 
+ *
  * Valid range for the preamble length code is [1..0xFF] which corresponds to [16..2048] symbols.
  * You can use convenience constants DWT_PLEN_32..DWT_PLEN_2048 defined for some
  * common preamble lengths. Note that setting preamble length smaller than 32 symbols
@@ -2830,17 +2831,17 @@ static void ull_readcir(dwchip_t *dw, uint32_t *buffer, dwt_acc_idx_e cir_idx, u
             }
         }
         else
-        {   
+        {
             /*
                 In QM33 hardware, each sample is a 24 bit number, with the upper 6 bits being the sign and lower 18 bits the value.
                 We need to first transpose the 24 bits into 32 bits and then compresse to 16 bits.
                 The 24 bit sample is formed in the following way:
                     S S S S S S V17 V16 V15 V14 V13 V12 V11 V10 V9 V8 V7 V6 V5 V4 V3 V2 V1 V0
                 The final 16 bit sample will depend on the reading modes as follows:
-                    - DWT_CIR_READ_LO: S V14 V13 V12 V11 V10 V9 V8 V7 V6 V5 V4 V3 V2 V1 V0 
+                    - DWT_CIR_READ_LO: S V14 V13 V12 V11 V10 V9 V8 V7 V6 V5 V4 V3 V2 V1 V0
                     - DWT_CIR_READ_MI: S V15 V14 V13 V12 V11 V10 V9 V8 V7 V6 V5 V4 V3 V2 V1
                     - DWT_CIR_READ_HI: S V16 V15 V14 V13 V12 V11 V10 V9 V8 V7 V6 V5 V4 V3 V2
-            */             
+            */
             uint32_t current_sample_24bit;
             uint32_t current_sample_32bit;
             uint32_t sign_extended_32bit;
@@ -2850,7 +2851,7 @@ static void ull_readcir(dwchip_t *dw, uint32_t *buffer, dwt_acc_idx_e cir_idx, u
             {
                 // Get the full 24bit sample
                 current_sample_24bit = (uint32_t)p_rd[ 0 ] + ((uint32_t)p_rd[ 1 ] << 8UL) + ((uint32_t)p_rd[ 2 ] << 16UL);
-            
+
                 // Check the sign
                 if((current_sample_24bit & DWT_CIR_SIGN_24BIT_EXTEND_32BIT_MASK) != 0x0UL)
                 {
@@ -2879,7 +2880,7 @@ static void ull_readcir(dwchip_t *dw, uint32_t *buffer, dwt_acc_idx_e cir_idx, u
                 {
                     // Do nothing
                 }
-                
+
                 current_sample_signed = (int32_t)current_sample_32bit;
 
                 /* Check for saturation */
@@ -2890,7 +2891,7 @@ static void ull_readcir(dwchip_t *dw, uint32_t *buffer, dwt_acc_idx_e cir_idx, u
                 else if(current_sample_signed < -32768)
                 {
                     current_sample_signed = -32768;
-                }   
+                }
                 else
                 {
                     // Do nothing
@@ -4790,7 +4791,6 @@ void ull_enableautoack(dwchip_t *dw, uint8_t responseDelayTime, int32_t enable)
 void ull_signal_rx_buff_free(dwchip_t *dw)
 {
     dwt_writefastCMD(dw, CMD_DB_TOGGLE);
-
     // update the status
     if (LOCAL_DATA(dw)->dblbuffon == (uint8_t)DBL_BUFF_ACCESS_BUFFER_1)
     {
@@ -4843,6 +4843,8 @@ void ull_setdblrxbuffmode(dwchip_t *dw, dwt_dbl_buff_state_e dbl_buff_state, dwt
         or_val = SYS_CFG_DIS_DRXB_BIT_MASK;
         LOCAL_DATA(dw)->dblbuffon = (uint8_t)DBL_BUFF_OFF;
     }
+
+    LOCAL_DATA(dw)->dblbuffmode = (uint8_t)dbl_buff_mode;
 
     if (dbl_buff_mode == DBL_BUF_MODE_AUTO)
     {
@@ -4966,7 +4968,8 @@ static void ull_clear_cbData(dwt_cb_data_t* cbData)
  *        received frame information and frame control are read before calling the callback. If double buffering is activated, it
  *        will also toggle between reception buffers once the reception callback processing has ended.
  *
- *        /!\ This version of the ISR supports double buffering but does not support automatic RX re-enabling!
+ *        In automatic double-buffer mode, the hardware re-enables reception and
+ *        the host buffer selector is advanced after the callback.
  *
  * NOTE:  In PC based system using (Cheetah or ARM) USB to SPI converter there can be no interrupts, however we still need something
  *        to take the place of it and operate in a polled way. In an embedded system this function should be configured to be triggered
@@ -4985,7 +4988,7 @@ static void ull_isr(dwchip_t *dw)
     uint8_t fstat = dwt_read8bitoffsetreg(dw, FINT_STAT_ID, 0U);
     uint32_t status = dwt_read32bitreg(dw, SYS_STATUS_ID); // Read status register low 32bits
     uint8_t statusDB = 0U;
-    uint16_t datalength = ull_getframelength(dw, &LOCAL_DATA(dw)->cbData.rx_flags); // Save previous frame data length
+    uint16_t datalength = 0U;
     ull_clear_cbData(&LOCAL_DATA(dw)->cbData);
     LOCAL_DATA(dw)->cbData.dw = dw;
     bool rx_ok_event;
@@ -5013,6 +5016,8 @@ static void ull_isr(dwchip_t *dw)
             status |= SYS_STATUS_CIADONE_BIT_MASK;
         }
     }
+
+    datalength = ull_getframelength(dw, &LOCAL_DATA(dw)->cbData.rx_flags); // Save previous frame data length
 
     LOCAL_DATA(dw)->cbData.status = status;
 
@@ -5123,7 +5128,7 @@ static void ull_isr(dwchip_t *dw)
             cia_err |= SYS_STATUS_CPERR_BIT_MASK;
         }
 
-        // When RXFCE Error is due to frame with no payload OR when using No Data STS mode we do not get RXFCG but RXFR  
+        // When RXFCE Error is due to frame with no payload OR when using No Data STS mode we do not get RXFCG but RXFR
         if (rxfce_error_event_no_payload || (((status & SYS_STATUS_RXFR_BIT_MASK) != 0UL) &&
             ((LOCAL_DATA(dw)->stsconfig & (uint8_t)DWT_STS_MODE_ND) == (uint8_t)DWT_STS_MODE_ND)))
         {
@@ -5179,13 +5184,6 @@ static void ull_isr(dwchip_t *dw)
             {
                 dw->callbacks.cbRxOk(&LOCAL_DATA(dw)->cbData);
             }
-
-        }
-
-        if (LOCAL_DATA(dw)->dblbuffon != 0U) // check if in double buffer mode and if so which buffer host is currently accessing
-        {
-            // Free up the current buffer - let the device know that it can receive into this buffer again
-            ull_signal_rx_buff_free(dw);
         }
 
         LOCAL_DATA(dw)->cbData.rx_flags = 0U;
@@ -5199,7 +5197,6 @@ static void ull_isr(dwchip_t *dw)
         dwt_write32bitoffsetreg(dw, SYS_STATUS_ID, 0U, SYS_STATUS_ALL_RX_ERR | SYS_STATUS_CIADONE_BIT_MASK | SYS_STATUS_RXFR_BIT_MASK); // Clear RX error, CIADONE and RXFR event bits
 
         dwt_clear_db_events(dw); // clear the RX events (CPERR, CIADONE) relating to the current RX packet
-
         // Call the corresponding callback if present
         if (dw->callbacks.cbRxErr != NULL)
         {
@@ -5207,6 +5204,10 @@ static void ull_isr(dwchip_t *dw)
         }
 
         LOCAL_DATA(dw)->cbData.rx_flags = 0U;
+        if ((LOCAL_DATA(dw)->dblbuffon != 0U) && (LOCAL_DATA(dw)->dblbuffmode == (uint8_t)DBL_BUF_MODE_AUTO))
+        {
+            ull_signal_rx_buff_free(dw);
+        }
     }
 
     // Handle RX Timeout event (PTO and FWTO)
@@ -5217,7 +5218,6 @@ static void ull_isr(dwchip_t *dw)
         dwt_write32bitoffsetreg(dw, SYS_STATUS_ID, 0U, SYS_STATUS_ALL_RX_TO | SYS_STATUS_CIADONE_BIT_MASK);
 
         dwt_clear_db_events(dw); // clear the RX events (CPERR, CIADONE) relating to the current RX packet
-
         // Call the corresponding callback if present
         if (dw->callbacks.cbRxTo != NULL)
         {
@@ -7300,7 +7300,7 @@ void ull_writerdbstatus(dwchip_t *dw, uint8_t mask)
  */
 uint8_t ull_readrdbstatus(dwchip_t *dw)
 {
-    return dwt_read8bitoffsetreg(dw, SYS_STATUS_ID, 0U);
+    return dwt_read8bitoffsetreg(dw, RDB_STATUS_ID, 0U);
 }
 
 /*! ------------------------------------------------------------------------------------------------------------------
@@ -8443,8 +8443,8 @@ static uint8_t ull_pll_ch5_auto_cal(dwchip_t *dw, uint32_t coarse_code, uint16_t
  *        characteristics, if you pass in a temperature of TEMP_INIT (-127), the functions will also read
  *        onchip temperature sensors to determine the temperature, the crystal temperature
  *        could be different.
- *        If a crystal temperature of TEMP_INIT (-127) is passed, the function will assume 25C. 
- *        If a crystal trim of 0 is passed, the function will use the calibration value from OTP. 
+ *        If a crystal temperature of TEMP_INIT (-127) is passed, the function will assume 25C.
+ *        If a crystal trim of 0 is passed, the function will use the calibration value from OTP.
  *
  *         This is to compensate for crystal temperature versus frequency curve e.g.
  *
@@ -8462,7 +8462,7 @@ static uint8_t ull_pll_ch5_auto_cal(dwchip_t *dw, uint32_t coarse_code, uint16_t
  *
  * input parameters:
  * @param dw            - DW3720 chip descriptor handler.
- * @param[in] params -- the based-on parameters to set the new crystal trim. 
+ * @param[in] params -- the based-on parameters to set the new crystal trim.
  * @param[in] xtaltrim -- newly programmed crystal trim value
  *
  * output parameters
@@ -8477,7 +8477,7 @@ int32_t ull_xtal_temperature_compensation(dwchip_t *dw,
     uint32_t xtal_calc;
     int32_t temp_diff;
     int32_t xtal_trim = 0;
-    
+
     if (( NULL != params) && (NULL != xtaltrim))
     {
         if (params->temperature == TEMP_INIT)
@@ -8516,12 +8516,12 @@ int32_t ull_xtal_temperature_compensation(dwchip_t *dw,
         }
 
         dwt_write8bitoffsetreg(dw, XTAL_ID, 0U, (uint8_t) xtal_trim);
-        
+
         *xtaltrim = (uint8_t) xtal_trim;
-        
-        return (int32_t)DWT_SUCCESS; 
+
+        return (int32_t)DWT_SUCCESS;
     }
-    else 
+    else
     {
         return (int32_t)DWT_ERROR;
     }
