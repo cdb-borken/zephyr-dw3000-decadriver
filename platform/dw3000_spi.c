@@ -13,6 +13,8 @@
 #include <hal/nrf_gpio.h>
 #include <hal/nrf_spim.h>
 
+#include <core_cm4.h>
+
 #include <string.h>
 
 #include "dw3000_spi.h"
@@ -51,9 +53,23 @@ BUILD_ASSERT(DT_SPI_DEV_CS_GPIOS_FLAGS(DW_INST) & GPIO_ACTIVE_LOW, "DW3000 chip 
 static uint8_t tx_scratch[SPI_SCRATCH_LEN] __aligned(4);
 static uint8_t rx_scratch[SPI_SCRATCH_LEN] __aligned(4);
 
-/* Preserves the serialisation the Zephyr SPI API used to provide, since
- * dwt_isr() runs on the system workqueue alongside the ranging thread. */
-static K_SEM_DEFINE(spi_lock, 1, 1);
+/* Preserves the serialisation the Zephyr SPI API used to provide, since dwt_isr()
+ * runs on its own workqueue alongside the ranging thread. Must not be a semaphore
+ * or a scheduler lock: both end in a reschedule, which costs ~9us on every register
+ * access. On this uniprocessor build a spinlock is just BASEPRI masking, which
+ * leaves the BLE controller's zero-latency IRQs unaffected. Not reentrant. */
+static struct k_spinlock spi_lock;
+static k_spinlock_key_t spi_lock_key;
+
+static inline void spi_lock_acquire(void)
+{
+    spi_lock_key = k_spin_lock(&spi_lock);
+}
+
+static inline void spi_lock_release(void)
+{
+    k_spin_unlock(&spi_lock, spi_lock_key);
+}
 
 static const struct device* spi;
 #if KERNEL_VERSION_MAJOR > 3 || (KERNEL_VERSION_MAJOR == 3 && KERNEL_VERSION_MINOR >= 4)
@@ -290,7 +306,7 @@ int32_t dw3000_spi_write_crc(uint16_t headerLength, const uint8_t* headerBuffer,
     const size_t total = (size_t)headerLength + bodyLength + 1U;
     int ret;
 
-    k_sem_take(&spi_lock, K_FOREVER);
+    spi_lock_acquire();
     cs_assert();
 
     if (total <= SPI_SCRATCH_LEN)
@@ -318,7 +334,7 @@ int32_t dw3000_spi_write_crc(uint16_t headerLength, const uint8_t* headerBuffer,
     }
 
     cs_deassert();
-    k_sem_give(&spi_lock);
+    spi_lock_release();
 
     return ret;
 }
@@ -328,7 +344,7 @@ int32_t dw3000_spi_write(uint16_t headerLength, const uint8_t* headerBuffer, uin
     const size_t total = (size_t)headerLength + bodyLength;
     int ret;
 
-    k_sem_take(&spi_lock, K_FOREVER);
+    spi_lock_acquire();
     cs_assert();
 
     if (total <= SPI_SCRATCH_LEN)
@@ -351,7 +367,7 @@ int32_t dw3000_spi_write(uint16_t headerLength, const uint8_t* headerBuffer, uin
     }
 
     cs_deassert();
-    k_sem_give(&spi_lock);
+    spi_lock_release();
 
     return ret;
 }
@@ -361,7 +377,7 @@ int32_t dw3000_spi_read(uint16_t headerLength, uint8_t* headerBuffer, uint16_t r
     const size_t total = (size_t)headerLength + readLength;
     int ret;
 
-    k_sem_take(&spi_lock, K_FOREVER);
+    spi_lock_acquire();
     cs_assert();
 
     if (total <= SPI_SCRATCH_LEN)
@@ -384,7 +400,7 @@ int32_t dw3000_spi_read(uint16_t headerLength, uint8_t* headerBuffer, uint16_t r
     }
 
     cs_deassert();
-    k_sem_give(&spi_lock);
+    spi_lock_release();
 
     return ret;
 }
