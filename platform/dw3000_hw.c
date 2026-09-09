@@ -9,11 +9,6 @@
 #include "dw3000_hw.h"
 #include "dw3000_spi.h"
 
-/* Instrumentation: DWT->CYCCNT snapshots of the IRQ path. */
-volatile uint32_t dw3000_irq_cycles;
-volatile uint32_t dw3000_isr_done_cycles;
-volatile uint32_t dw3000_isr_passes;
-
 LOG_MODULE_REGISTER(dw3000, CONFIG_DW3000_LOG_LEVEL);
 
 #define DW_INST DT_INST(0, decawave_dw3000)
