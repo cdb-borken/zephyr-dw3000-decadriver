@@ -20,6 +20,7 @@ LOG_MODULE_REGISTER(dw3000, CONFIG_DW3000_LOG_LEVEL);
 
 static struct gpio_callback gpio_cb;
 static struct k_work dw3000_isr_work;
+static struct k_mutex dw3000_bus_mutex;
 
 /* The ISR must not share the system workqueue: BLE, USB/RNDIS and networking
  * work items queued ahead of it delay TX/RX completion by an unbounded amount. */
@@ -49,6 +50,8 @@ static const struct dw3000_config conf = {
 
 int dw3000_hw_init(void)
 {
+    k_mutex_init(&dw3000_bus_mutex);
+
     /* Reset */
     if (conf.gpio_reset.port)
     {
@@ -87,6 +90,7 @@ static void dw3000_hw_isr_work_handler(struct k_work* item)
      * starve every application thread. */
     int passes = 0;
 
+    dw3000_hw_bus_lock();
     while (gpio_pin_get_dt(&conf.gpio_irq))
     {
         dwt_isr();
@@ -97,9 +101,20 @@ static void dw3000_hw_isr_work_handler(struct k_work* item)
             break;
         }
     }
+    dw3000_hw_bus_unlock();
 
     dw3000_isr_passes = passes;
     dw3000_isr_done_cycles = DWT->CYCCNT;
+}
+
+void dw3000_hw_bus_lock(void)
+{
+    k_mutex_lock(&dw3000_bus_mutex, K_FOREVER);
+}
+
+void dw3000_hw_bus_unlock(void)
+{
+    k_mutex_unlock(&dw3000_bus_mutex);
 }
 
 static void dw3000_hw_isr(const struct device* dev, struct gpio_callback* cb, uint32_t pins)

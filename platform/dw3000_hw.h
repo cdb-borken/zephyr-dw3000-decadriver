@@ -17,6 +17,8 @@ void dw3000_hw_wakeup_pin_low(void);
 void dw3000_hw_interrupt_enable(void);
 void dw3000_hw_interrupt_disable(void);
 bool dw3000_hw_interrupt_is_enabled(void);
+void dw3000_hw_bus_lock(void);
+void dw3000_hw_bus_unlock(void);
 
 #ifdef __cplusplus
 }
