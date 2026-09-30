@@ -5099,7 +5099,10 @@ static void ull_isr(dwchip_t *dw)
         // VTDET, GPIO, not handled here ...
     }
 
-    rx_ok_event = ((fstat & FINT_STAT_RXOK_BIT_MASK) != 0U) || ((LOCAL_DATA(dw)->dblbuffon != 0U) && ((statusDB & RDB_STATUS_RXOK) != 0U));
+    rx_ok_event = ((fstat & FINT_STAT_RXOK_BIT_MASK) != 0U) ||
+                  ((LOCAL_DATA(dw)->dblbuffon != 0U) &&
+                   (((statusDB & RDB_STATUS_RXFCG0_BIT_MASK) != 0U) ||
+                    (((statusDB & RDB_STATUS_RXFR0_BIT_MASK) != 0U) && (LOCAL_DATA(dw)->sys_cfg_dis_fce_bit_flag != 0U))));
     rxfce_error_event_no_payload = ((status & SYS_STATUS_RXFCE_BIT_MASK) != 0U) && (datalength == 0U) && (((uint8_t)dw->isrFlags & (uint8_t)DWT_LEN0_RXGOOD) != 0U);
     // Handle RX OK event, and RX FCE error event generated because the received frame has no payload (PEG-2043)
     if (rx_ok_event || rxfce_error_event_no_payload)
