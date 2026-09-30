@@ -10,6 +10,8 @@ extern "C"
 
     int dw3000_hw_init(void);
     int dw3000_hw_init_interrupt(void);
+    void dw3000_hw_bus_lock(void);
+    void dw3000_hw_bus_unlock(void);
     void dw3000_hw_fini(void);
     void dw3000_hw_reset(void);
     void dw3000_hw_wakeup(void);
