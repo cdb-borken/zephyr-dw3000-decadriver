@@ -73,7 +73,7 @@ static inline void spi_lock_release(void)
 
 static const struct device* spi;
 #if KERNEL_VERSION_MAJOR > 3 || (KERNEL_VERSION_MAJOR == 3 && KERNEL_VERSION_MINOR >= 4)
-static struct spi_cs_control cs_ctrl = SPI_CS_CONTROL_INIT(DW_INST, 0);
+static struct spi_cs_control cs_ctrl = SPI_CS_CONTROL_INIT(DW_INST);
 #else
 static struct spi_cs_control* cs_ctrl = SPI_CS_CONTROL_PTR_DT(DW_INST, 0);
 #endif
